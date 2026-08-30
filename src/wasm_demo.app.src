@@ -1,0 +1,8 @@
+{application, wasm_demo, [
+    {description, "A small project using erlang_wasm"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [kernel, stdlib, wasm]},
+    {env, []},
+    {modules, []}
+]}.

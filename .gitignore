@@ -1,0 +1,4 @@
+_build/
+priv/qjs-wasi.wasm
+*.beam
+erl_crash.dump
