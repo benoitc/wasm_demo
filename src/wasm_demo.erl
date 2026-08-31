@@ -6,11 +6,11 @@
 
 %% A module compiled from text, called like a function.
 add(A, B) ->
-    {ok, Mod} = wat(~"""
+    {ok, Mod} = wasm:compile({wat, ~"""
     (module
       (func (export "add") (param i32 i32) (result i32)
         local.get 0 local.get 1 i32.add))
-    """),
+    """}),
     {ok, Inst} = wasm:instantiate(Mod, #{}),
     {ok, [Sum]} = wasm:call(Inst, ~"add", [A, B]),
     ok = wasm:destroy(Inst),
@@ -19,14 +19,14 @@ add(A, B) ->
 %% The guest calls an import that Erlang provides: it hands a name to
 %% `env.greet`, which writes a greeting back into the guest's memory.
 greet(Name) when is_binary(Name) ->
-    {ok, Mod} = wat(~"""
+    {ok, Mod} = wasm:compile({wat, ~"""
     (module
       (import "env" "greet" (func $greet (param i32 i32) (result i32)))
       (memory (export "memory") 1)
       ;; the name sits at 0; greet returns the length written at 1024
       (func (export "run") (param i32) (result i32)
         (call $greet (i32.const 0) (local.get 0))))
-    """),
+    """}),
     Greet = fun(Ctx, [Ptr, Len]) ->
         {ok, Who} = wasm:read_memory(Ctx, Ptr, Len),
         Reply = <<"hello, ", Who/binary, "!">>,
@@ -68,10 +68,6 @@ js_stop(#{pid := Pid}) ->
     receive {stopped, Pid, R} -> R after 5000 -> error(no_exit) end.
 
 %%% ------------------------------------------------------------- internals ---
-
-wat(Source) ->
-    {ok, Parsed} = wasm_wat:module(Source),
-    wasm:validate(Parsed).
 
 %% One instance per worker, torn down when `_start` returns. `stdout` is a
 %% function rather than a pid so the partial writes a guest makes are joined
