@@ -75,7 +75,7 @@ qjs(Priv) ->
     File = filename:join(Priv, "qjs-wasi.wasm"),
     case file:read_file(File) of
         {ok, Bin} -> Bin;
-        {error, enoent} -> error({no_qjs, File, "run `make' to fetch it"});
+        {error, enoent} -> error({no_qjs, File, "run `make priv' to fetch it"});
         {error, Why} -> error({no_qjs, File, Why})
     end.
 

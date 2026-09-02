@@ -5,16 +5,46 @@ function the guest calls, and a QuickJS worker kept running over stdin and
 stdout. The runtime is written in Erlang, so there is no native toolchain to
 install and nothing to build beyond `rebar3 compile`.
 
+## Set it up
+
+You need Erlang/OTP 29 (the runtime uses `-nominal` types and triple-quoted
+strings), rebar3, and `curl` for one download. No C toolchain and no
+WebAssembly toolchain.
+
 ```sh
-make test          # fetches qjs-wasi.wasm, builds, runs the eunit tests
+git clone https://github.com/benoitc/wasm_demo.git
+cd wasm_demo
+make priv          # downloads priv/qjs-wasi.wasm, about 1 MB, once
+make test          # 3 tests, 0 failures
+```
+
+`make priv` is the step that fills `priv/`. You do not have to run it
+separately, because `make`, `make test` and `make shell` all depend on it; it
+has a name so that the one thing a fresh clone is missing has a command that
+gets it.
+
+## Try it
+
+```sh
 make shell
+```
+
+```erlang
 1> wasm_demo:add(3, 4).
 7
 2> wasm_demo:greet(~"erlang").
 <<"hello, erlang!">>
 3> W = wasm_demo:js_worker(), wasm_demo:js_ask(W, #{name => ~"ada"}).
 #{<<"name">> => <<"ADA">>}
+4> wasm_demo:js_ask(W, #{x => ~"y", n => 1}).
+#{<<"n">> => 1,<<"x">> => <<"Y">>}
+5> wasm_demo:js_stop(W).
+{ok,[]}
 ```
+
+The first two build and run a module inline. The rest go through one QuickJS
+worker that stays alive between calls, which is what the rest of this page is
+about.
 
 ## What is in priv/
 
@@ -24,13 +54,17 @@ make shell
 | `qjs-wasi.wasm` | **no** | the QuickJS interpreter, [released by quickjs-ng][qjs] and fetched by the Makefile |
 
 `qjs-wasi.wasm` is somebody else's build, so it is downloaded rather than
-committed and `.gitignore` keeps it out. **A fresh clone does not have it**, and
-`wasm_demo:js_worker/0` reads it from `code:priv_dir(wasm_demo)` and fails
-without it. `make`, `make test` and `make shell` each fetch it first, so use
-one of those rather than `rebar3` directly the first time.
+committed and `.gitignore` keeps it out. **A fresh clone does not have it.**
+`make priv` fetches it, and `make`, `make test` and `make shell` each do that
+first, so the only way to hit the gap is to run `rebar3` directly on a fresh
+clone. If you do, `wasm_demo:js_worker/0` says which file is missing:
 
-To pin a different QuickJS, change `QJS_URL` in the Makefile and delete the
-file. Nothing else in the project knows the version.
+```erlang
+** exception error: {no_qjs,".../priv/qjs-wasi.wasm","run `make priv' to fetch it"}
+```
+
+To pin a different QuickJS, change `QJS_URL` in the Makefile and run
+`make distclean priv`. Nothing else in the project knows the version.
 
 `worker.js` is mounted read-only at `/app`, and it is the only path the guest
 can see:
