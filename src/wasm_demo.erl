@@ -57,8 +57,8 @@ js_worker() -> worker("qjs-wasi.wasm", [~"qjs", ~"/app/worker.js"], 1024).
 %% `-u' because CPython buffers stdout in blocks when it is not a terminal, and
 %% a reply held in the guest's buffer is a reply that has not arrived.
 %%
-%% The first request pays for CPython starting: about 33 seconds here, against
-%% 11 to 91 milliseconds for the ones after it. That ratio is the argument for
+%% The first request pays for CPython starting: about 34 seconds here, against
+%% 8 to 88 milliseconds for the ones after it. That ratio is the argument for
 %% the worker. A process per request would pay it every time.
 py_worker() -> worker("python.wasm", [~"python", ~"-u", ~"/app/worker.py"], 4096).
 

@@ -66,18 +66,25 @@ Neither knows Erlang exists. What differs is what starting one costs:
 
 | | QuickJS | CPython |
 | --- | ---: | ---: |
-| the module | 1 MB | 25 MB |
-| decode and validate | 30 ms | 769 ms |
-| instantiate | 3 ms | 597 ms |
-| first request | 250 ms | 32,862 ms |
-| every request after | 2 ms | 11 to 91 ms |
+| the module | 1.5 MB | 25 MB |
+| decode and validate | 105 ms | 643 ms |
+| instantiate | 93 ms | 554 ms |
+| first request | 213 ms | 34,396 ms |
+| every request after | 1 to 12 ms | 8 to 88 ms |
 
-CPython takes half a minute to reach its first reply, because `python -c
-"print(6*7)"` is 30 seconds of importing `encodings` and `site` on an
-interpreted runtime, and then answers in tens of milliseconds. **That ratio is
-the argument for the worker.** A process per request would pay the 33 seconds
-every time; one that stays up pays it once. Measured on this machine, so treat
-them as shape rather than as numbers you will reproduce.
+CPython takes half a minute to reach its first reply and then answers in tens of
+milliseconds, because that first request is CPython itself starting: importing
+`encodings` and `site` on an interpreted runtime. **That ratio is the argument
+for the worker.** A process per request would pay the half minute every time;
+one that stays up pays it once.
+
+Two honest caveats. These are one machine on one afternoon, so read them as
+shape and not as numbers you will reproduce. And CPython's first request is
+about 34 seconds in a fresh VM but about 14 in a VM that has already run one:
+the difference is garbage collection, 20.6 seconds of it across 183 major
+collections the first time against 0.9 seconds and a single major after that,
+for the same reductions and the same 227 MB peak heap. Whichever number you
+get, the shape of the table does not change.
 
 ## What is in priv/
 
