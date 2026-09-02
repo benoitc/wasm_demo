@@ -2,7 +2,7 @@
 %% back into Erlang, and keep a JavaScript worker running.
 -module(wasm_demo).
 
--export([add/2, greet/1, js_worker/0, js_ask/2, js_stop/1]).
+-export([add/2, greet/1, js_worker/0, py_worker/0, ask/2, ask/3, stop/1]).
 
 %% A module compiled from text, called like a function.
 add(A, B) ->
@@ -40,7 +40,9 @@ greet(Name) when is_binary(Name) ->
     ok = wasm:destroy(Inst),
     Reply.
 
-%% A QuickJS worker that answers one JSON line per request.
+%% Two workers that answer one JSON line per request, in two languages that
+%% know nothing about Erlang. They differ only in which interpreter is loaded
+%% and which script it is told to run.
 %%
 %% There is no async call here and none is wanted: `_start` runs inline on a
 %% process of its own, and the guest blocks in `fd_read` because the `stdin`
@@ -48,42 +50,58 @@ greet(Name) when is_binary(Name) ->
 %% killing the process is how you stop a runaway script.
 %%
 %% Needs priv/qjs-wasi.wasm (see the Makefile).
-js_worker() ->
+js_worker() -> worker("qjs-wasi.wasm", [~"qjs", ~"/app/worker.js"], 1024).
+
+%% Needs priv/python.wasm, which `make priv' fetches too.
+%%
+%% `-u' because CPython buffers stdout in blocks when it is not a terminal, and
+%% a reply held in the guest's buffer is a reply that has not arrived.
+%%
+%% The first request pays for CPython starting: about 33 seconds here, against
+%% 11 to 91 milliseconds for the ones after it. That ratio is the argument for
+%% the worker. A process per request would pay it every time.
+py_worker() -> worker("python.wasm", [~"python", ~"-u", ~"/app/worker.py"], 4096).
+
+worker(File, Args, Pages) ->
     Owner = self(),
     Priv = code:priv_dir(wasm_demo),
-    {ok, Mod} = wasm:compile(qjs(Priv)),
-    Pid = spawn_link(fun() -> run_worker(Mod, Priv, Owner) end),
+    {ok, Mod} = wasm:compile(guest(Priv, File)),
+    Pid = spawn_link(fun() -> run_worker(Mod, Args, Pages, Priv, Owner) end),
     #{pid => Pid}.
 
-js_ask(#{pid := Pid}, Term) ->
+%% `Timeout' is the caller's, not the guest's: CPython's first request needs
+%% far longer than QuickJS's.
+ask(W, Term) -> ask(W, Term, 5000).
+
+ask(#{pid := Pid}, Term, Timeout) ->
     Pid ! {req, self(), [json:encode(Term), $\n]},
     receive
         {line, Pid, Line} -> json:decode(string:chomp(Line))
-    after 5000 -> error(no_reply)
+    after Timeout -> error(no_reply)
     end.
 
-js_stop(#{pid := Pid}) ->
+stop(#{pid := Pid}) ->
     Pid ! {stop, self()},
     receive {stopped, Pid, R} -> R after 5000 -> error(no_exit) end.
 
 %%% ------------------------------------------------------------- internals ---
 
-%% The interpreter is somebody else's build and is not in git, so a fresh clone
-%% does not have it until the Makefile fetches it. Say that, rather than failing
-%% on a badmatch that names neither the file nor the fix.
-qjs(Priv) ->
-    File = filename:join(Priv, "qjs-wasi.wasm"),
+%% An interpreter is somebody else's build and is not in git, so a fresh clone
+%% does not have one until the Makefile fetches it. Say that, rather than
+%% failing on a badmatch that names neither the file nor the fix.
+guest(Priv, Name) ->
+    File = filename:join(Priv, Name),
     case file:read_file(File) of
         {ok, Bin} -> Bin;
-        {error, enoent} -> error({no_qjs, File, "run `make priv' to fetch it"});
-        {error, Why} -> error({no_qjs, File, Why})
+        {error, enoent} -> error({no_guest, File, "run `make priv' to fetch it"});
+        {error, Why} -> error({no_guest, File, Why})
     end.
 
 %% One instance per worker, torn down when `_start` returns. `stdout` is a
 %% function rather than a pid so the partial writes a guest makes are joined
 %% into whole lines here rather than by whoever asked.
-run_worker(Mod, Priv, Owner) ->
-    Wasi = #{args => [~"qjs", ~"/app/worker.js"],
+run_worker(Mod, Args, Pages, Priv, Owner) ->
+    Wasi = #{args => Args,
              dirs => [{~"/app", Priv, read}],
              stdin => fun(_Want) -> next_request() end,
              stdout => fun(Data) -> collect_line(Owner, Data) end,
@@ -91,7 +109,7 @@ run_worker(Mod, Priv, Owner) ->
              clocks => [monotonic, realtime],
              random => strong},
     {ok, Inst} = wasm:instantiate(Mod, wasi_preview1:imports(Wasi),
-                                  #{max_memory_pages => 1024}),
+                                  #{max_memory_pages => Pages}),
     R = wasm:call(Inst, ~"_start", []),
     ok = wasm:destroy(Inst),
     receive {stop, From} -> From ! {stopped, self(), R} after 0 -> ok end.

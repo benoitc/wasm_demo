@@ -1,4 +1,5 @@
 _build/
 priv/qjs-wasi.wasm
+priv/python.wasm
 *.beam
 erl_crash.dump
