@@ -51,8 +51,7 @@ greet(Name) when is_binary(Name) ->
 js_worker() ->
     Owner = self(),
     Priv = code:priv_dir(wasm_demo),
-    {ok, Bin} = file:read_file(filename:join(Priv, "qjs-wasi.wasm")),
-    {ok, Mod} = wasm:compile(Bin),
+    {ok, Mod} = wasm:compile(qjs(Priv)),
     Pid = spawn_link(fun() -> run_worker(Mod, Priv, Owner) end),
     #{pid => Pid}.
 
@@ -68,6 +67,17 @@ js_stop(#{pid := Pid}) ->
     receive {stopped, Pid, R} -> R after 5000 -> error(no_exit) end.
 
 %%% ------------------------------------------------------------- internals ---
+
+%% The interpreter is somebody else's build and is not in git, so a fresh clone
+%% does not have it until the Makefile fetches it. Say that, rather than failing
+%% on a badmatch that names neither the file nor the fix.
+qjs(Priv) ->
+    File = filename:join(Priv, "qjs-wasi.wasm"),
+    case file:read_file(File) of
+        {ok, Bin} -> Bin;
+        {error, enoent} -> error({no_qjs, File, "run `make' to fetch it"});
+        {error, Why} -> error({no_qjs, File, Why})
+    end.
 
 %% One instance per worker, torn down when `_start` returns. `stdout` is a
 %% function rather than a pid so the partial writes a guest makes are joined
