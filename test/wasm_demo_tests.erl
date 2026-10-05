@@ -22,3 +22,18 @@ round_trip(W, First) ->
     ?assertEqual(#{~"x" => ~"Y"}, wasm_demo:ask(W, #{x => ~"y"})),
     ?assertEqual(#{~"z" => ~"Z"}, wasm_demo:ask(W, #{z => ~"z"})),
     ?assertEqual({ok, []}, wasm_demo:stop(W)).
+
+%% A component needs the `wasm' application running, which `rebar3 shell'
+%% does for you and a bare test does not.
+component_test() ->
+    {ok, _} = application:ensure_all_started(wasm),
+    T = wasm_demo:text([~"the", ~"a"]),
+    ?assertEqual({ok, ~"HELLO, COMPONENT!"}, wasm_demo:shout(T, ~"hello, component")),
+    ?assertEqual({error, ~"nothing to shout"}, wasm_demo:shout(T, ~"  ")),
+    H = wasm_demo:tally(T),
+    ?assertEqual(3, wasm_demo:count(T, H, ~"the cat saw the dog")),
+    ?assertEqual(3, wasm_demo:count(T, H, ~"a cat, a dog")),
+    ?assertEqual([#{~"word" => ~"cat", ~"n" => 2}, #{~"word" => ~"dog", ~"n" => 2}],
+                 wasm_demo:top(T, H, 2)),
+    ?assertEqual(ok, wasm_demo:drop(T, H)),
+    ?assertEqual(ok, wasm_demo:close(T)).

@@ -1,21 +1,24 @@
 # wasm_demo
 
-A small project that uses [erlang_wasm][]: a module compiled from text, a host
-function the guest calls, and two language runtimes, QuickJS and CPython, kept
-running over stdin and stdout. The runtime is written in Erlang, so there is no
-native toolchain to install and nothing to build beyond `rebar3 compile`.
+A small project that uses [erlang_wasm][] 0.9: a module compiled from text, a
+host function the guest calls, two language runtimes, QuickJS and CPython, kept
+running over stdin and stdout, and a component called with typed values. The
+runtime is written in Erlang, so there is no native toolchain to install and
+nothing to build beyond `rebar3 compile`.
 
 ## Set it up
 
 You need Erlang/OTP 29 (the runtime uses `-nominal` types and triple-quoted
 strings), rebar3, and `curl` for one download. No C toolchain and no
-WebAssembly toolchain.
+WebAssembly toolchain. If a C compiler is present, erlang_wasm builds an
+optional NIF for WASI path resolution; without one it uses its Erlang fallback
+and says so during the build.
 
 ```sh
 git clone https://github.com/benoitc/wasm_demo.git
 cd wasm_demo
 make priv          # downloads the two interpreters, about 26 MB, once
-make test          # 4 tests, 0 failures
+make test          # 5 tests, 0 failures
 ```
 
 `make priv` is the step that fills `priv/`. You do not have to run it
@@ -54,9 +57,27 @@ one: it is paying for CPython to start.
 {ok,[]}
 ```
 
-The first two calls build and run a module inline. The rest go through a worker
-that keeps an interpreter alive between calls, which is what the rest of this
-page is about.
+A component, called with strings, records and lists rather than pointers:
+
+```erlang
+9> T = wasm_demo:text([~"the", ~"a"]), wasm_demo:shout(T, ~"hello, component").
+{ok,<<"HELLO, COMPONENT!">>}
+10> wasm_demo:shout(T, ~"").
+{error,<<"nothing to shout">>}
+11> H = wasm_demo:tally(T), wasm_demo:count(T, H, ~"the cat saw the dog").
+3
+12> wasm_demo:count(T, H, ~"a cat, a dog").
+3
+13> wasm_demo:top(T, H, 2).
+[#{<<"n">> => 2,<<"word">> => <<"cat">>},
+ #{<<"n">> => 2,<<"word">> => <<"dog">>}]
+14> wasm_demo:drop(T, H), wasm_demo:close(T).
+ok
+```
+
+The first two calls build and run a module inline. The worker calls keep an
+interpreter alive between requests, and most of this page is about them. The
+last block is a component, and [Components](#components) explains it.
 
 ## Why the worker, in one table
 
@@ -84,7 +105,8 @@ about 34 seconds in a fresh VM but about 14 in a VM that has already run one:
 the difference is garbage collection, 20.6 seconds of it across 183 major
 collections the first time against 0.9 seconds and a single major after that,
 for the same reductions and the same 227 MB peak heap. Whichever number you
-get, the shape of the table does not change.
+get, the shape of the table does not change. Re-run on erlang_wasm
+0.9.0, every row is within noise of the one above.
 
 ## What is in priv/
 
@@ -92,10 +114,11 @@ get, the shape of the table does not change.
 | --- | --- | --- |
 | `worker.js` | yes | the JavaScript guest: one JSON object per line in, one per line out |
 | `worker.py` | yes | the same thing in Python |
+| `text.component.wasm` | yes | the component, built from `component/` by `make component` |
 | `qjs-wasi.wasm` | **no** | the QuickJS interpreter, [released by quickjs-ng][qjs] |
 | `python.wasm` | **no** | CPython 3.12 for `wasm32-wasi`, [built by VMware Labs][wlr] |
 
-The two `.wasm` files are somebody else's builds, so they are downloaded rather
+The two interpreters are somebody else's builds, so they are downloaded rather
 than committed and `.gitignore` keeps them out. **A fresh clone does not have
 them.** `make priv` fetches both, and `make`, `make test` and `make shell` each
 do that first, so the only way to hit the gap is to run `rebar3` directly on a
@@ -171,6 +194,92 @@ thing it does not do is bound a guest that stops reading, which is what
 Backpressure is the mailbox. [Streams][streams] and [Workers][workers] in the
 erlang_wasm guides have the general version of both.
 
+## Components
+
+A core module speaks in integers and a memory you write into, which is why
+`greet/1` copies a name into memory and reads the reply back by offset. A
+component declares its interface in WIT, and erlang_wasm marshals values across
+it through the Canonical ABI. `priv/text.component.wasm` is built from
+`component/`, and its interface is the whole contract:
+
+```wit
+interface host {
+  stop-word: func(word: string) -> bool;
+}
+
+interface words {
+  record count { word: string, n: u32 }
+  shout: func(input: string) -> result<string, string>;
+  resource tally {
+    constructor();
+    add: func(text: string) -> u32;
+    top: func(n: u32) -> list<count>;
+  }
+}
+
+world text {
+  import host;
+  export words;
+}
+```
+
+### Call an export
+
+You name the export and give its WIT signature as descriptors. Exports of an
+interface are named `<interface>#<function>`:
+
+```erlang
+Sig = {[string], {result, string, string}},
+{ok, {ok, Loud}} = wasm_component:call(T, ~"demo:text/words#shout", Sig, [~"hi"]).
+```
+
+A `result` comes back as `{ok, V}` or `{error, E}`, so a refusal from the guest
+is a value you match on, not a trap. A `record` is a map, a `list` is a list.
+
+### Answer an import
+
+The component imports `stop-word`, and the Erlang list you pass to `text/1`
+answers it. `import_fun/2` lifts the guest's arguments to terms and lowers your
+return value back:
+
+```erlang
+StopWord = wasm_component:import_fun({[string], bool},
+                                     fun([W]) -> lists:member(W, StopWords) end),
+{ok, T} = wasm_component:instantiate(Bin, #{{~"demo:text/host", ~"stop-word"} => StopWord}).
+```
+
+Every word the tally counts goes through that fun first, which is why "the" and
+"a" never show up in `top/3`.
+
+### Hold a resource
+
+`tally` is state the component owns. The constructor gives you a handle; you
+pass it back to each method as a `borrow` and give it up with
+`drop_resource/3`, which runs the guest's destructor:
+
+```erlang
+{ok, H} = wasm_component:call(T, ~"demo:text/words#[constructor]tally", {[], {own, 0}}, []),
+{ok, N} = wasm_component:call(T, ~"demo:text/words#[method]tally.add",
+                              {[{borrow, 0}, string], u32}, [H, ~"the cat"]),
+ok = wasm_component:drop_resource(T, ~"demo:text/words#[dtor]tally", H).
+```
+
+Notes:
+
+- Components need the `wasm` application running. `rebar3 shell` starts it
+  because `rebar.config` lists the app under `shell`; a test or an escript
+  calls `application:ensure_all_started(wasm)`.
+- The instance belongs to the process that created it. Call it and destroy it
+  from there, or put it behind a worker the way `js_worker/0` does.
+- Do not use a handle after you drop it. For a handle you hold, erlang_wasm
+  0.9 returns whatever the freed memory now says rather than trapping.
+- The built component is in git, so you need no toolchain to run it. To change
+  it, edit `component/` and run `make component`, which needs Rust with the
+  `wasm32-unknown-unknown` target and `wasm-tools`.
+
+[Components][components] in the erlang_wasm guides has the full descriptor
+table, composed components and WASI 0.2.
+
 ## Capabilities
 
 Nothing is ambient: leave `dirs` out and the guest has no filesystem, leave
@@ -185,3 +294,4 @@ Apache-2.0. See [LICENSE](LICENSE).
 [wlr]: https://github.com/vmware-labs/webassembly-language-runtimes/releases
 [streams]: https://github.com/benoitc/erlang_wasm/blob/main/docs/streams.md
 [workers]: https://github.com/benoitc/erlang_wasm/blob/main/docs/worker.md
+[components]: https://github.com/benoitc/erlang_wasm/blob/main/docs/components.md

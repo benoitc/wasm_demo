@@ -1,0 +1,28 @@
+package demo:text;
+
+// What the guest asks of its host. Erlang answers it.
+interface host {
+  stop-word: func(word: string) -> bool;
+}
+
+interface words {
+  record count {
+    word: string,
+    n: u32,
+  }
+
+  // Uppercase a phrase; an empty one is refused as a value, not a trap.
+  shout: func(input: string) -> result<string, string>;
+
+  // State the component owns. Erlang holds a handle to it.
+  resource tally {
+    constructor();
+    add: func(text: string) -> u32;
+    top: func(n: u32) -> list<count>;
+  }
+}
+
+world text {
+  import host;
+  export words;
+}
