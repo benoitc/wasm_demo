@@ -108,8 +108,9 @@ shout(T, Phrase) ->
     R.
 
 %% A tally lives in the component. What you hold is a handle to it, which you
-%% pass back to every method and give up with `drop/2`. Do not use a handle
-%% after dropping it: it names memory the guest has freed.
+%% pass back to every method and give up with `drop/2`. The handle is an index
+%% the runtime checks, so one you already dropped is refused as a trap rather
+%% than reaching the guest.
 tally(T) ->
     {ok, H} = wasm_component:call(T, words(~"[constructor]tally"), {[], {own, 0}}, []),
     H.
