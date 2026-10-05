@@ -1,6 +1,6 @@
 # wasm_demo
 
-A small project that uses [erlang_wasm][] 0.9: a module compiled from text, a
+A small project that uses [erlang_wasm][] 0.9.1: a module compiled from text, a
 host function the guest calls, two language runtimes, QuickJS and CPython, kept
 running over stdin and stdout, and a component called with typed values. The
 runtime is written in Erlang, so there is no native toolchain to install and
@@ -264,15 +264,21 @@ pass it back to each method as a `borrow` and give it up with
 ok = wasm_component:drop_resource(T, ~"demo:text/words#[dtor]tally", H).
 ```
 
+The handle is a small index into the instance's handle table, and the runtime
+checks it. Once dropped, it is refused before the guest sees it:
+
+```erlang
+{error, #{class := trap, kind := resource_not_live}} =
+    wasm_component:drop_resource(T, ~"demo:text/words#[dtor]tally", H).
+```
+
 Notes:
 
-- Components need the `wasm` application running. `rebar3 shell` starts it
-  because `rebar.config` lists the app under `shell`; a test or an escript
-  calls `application:ensure_all_started(wasm)`.
+- A component does not need the `wasm` application. When it is running, as in
+  `rebar3 shell` (`rebar.config` lists the app under `shell`), the component
+  is compiled once through its module cache; otherwise it compiles inline.
 - The instance belongs to the process that created it. Call it and destroy it
   from there, or put it behind a worker the way `js_worker/0` does.
-- Do not use a handle after you drop it. For a handle you hold, erlang_wasm
-  0.9 returns whatever the freed memory now says rather than trapping.
 - The built component is in git, so you need no toolchain to run it. To change
   it, edit `component/` and run `make component`, which needs Rust with the
   `wasm32-unknown-unknown` target and `wasm-tools`.

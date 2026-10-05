@@ -23,10 +23,9 @@ round_trip(W, First) ->
     ?assertEqual(#{~"z" => ~"Z"}, wasm_demo:ask(W, #{z => ~"z"})),
     ?assertEqual({ok, []}, wasm_demo:stop(W)).
 
-%% A component needs the `wasm' application running, which `rebar3 shell'
-%% does for you and a bare test does not.
+%% No `application:ensure_all_started(wasm)': a component compiles inline
+%% when the module cache is not running.
 component_test() ->
-    {ok, _} = application:ensure_all_started(wasm),
     T = wasm_demo:text([~"the", ~"a"]),
     ?assertEqual({ok, ~"HELLO, COMPONENT!"}, wasm_demo:shout(T, ~"hello, component")),
     ?assertEqual({error, ~"nothing to shout"}, wasm_demo:shout(T, ~"  ")),
@@ -36,4 +35,6 @@ component_test() ->
     ?assertEqual([#{~"word" => ~"cat", ~"n" => 2}, #{~"word" => ~"dog", ~"n" => 2}],
                  wasm_demo:top(T, H, 2)),
     ?assertEqual(ok, wasm_demo:drop(T, H)),
+    ?assertMatch({error, #{class := trap, kind := resource_not_live}}, wasm_demo:drop(T, H)),
+    ?assertError({badmatch, {error, #{kind := resource_not_live}}}, wasm_demo:count(T, H, ~"cat")),
     ?assertEqual(ok, wasm_demo:close(T)).
