@@ -1,6 +1,6 @@
 # wasm_demo
 
-A small project that uses [erlang_wasm][] 0.9.1: a module compiled from text, a
+A small project that uses [erlang_wasm][] 0.9.2: a module compiled from text, a
 host function the guest calls, two language runtimes, QuickJS and CPython, kept
 running over stdin and stdout, and a component called with typed values. The
 runtime is written in Erlang, so there is no native toolchain to install and
@@ -105,8 +105,10 @@ about 34 seconds in a fresh VM but about 14 in a VM that has already run one:
 the difference is garbage collection, 20.6 seconds of it across 183 major
 collections the first time against 0.9 seconds and a single major after that,
 for the same reductions and the same 227 MB peak heap. Whichever number you
-get, the shape of the table does not change. Re-run on erlang_wasm
-0.9.0, every row is within noise of the one above.
+get, the shape of the table does not change. Re-run on erlang_wasm 0.9.0,
+and again on 0.9.2 against 0.9.1, every row is within noise of the one above:
+0.9.2 changed only the compiled tier, which these interpreted workers do not
+use.
 
 ## What is in priv/
 
@@ -288,8 +290,10 @@ table, composed components and WASI 0.2.
 
 ## Capabilities
 
-Nothing is ambient: leave `dirs` out and the guest has no filesystem, leave
-`net` out and it has no network. It gets what you granted and nothing else.
+Files and the network are never ambient: leave `dirs` out and the guest has
+no filesystem, leave `net` out and it has no network. Clocks and random data
+are on unless you narrow them with `clocks` and `random`. The workers here
+name their clocks and their random source, so what they grant is written down.
 
 ## License
 
