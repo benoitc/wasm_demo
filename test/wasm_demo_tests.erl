@@ -23,6 +23,13 @@ round_trip(W, First) ->
     ?assertEqual(#{~"z" => ~"Z"}, wasm_demo:ask(W, #{z => ~"z"})),
     ?assertEqual({ok, []}, wasm_demo:stop(W)).
 
+%% Several of the guest's reads, so more than one chunk crosses each stream.
+wasi3_test() ->
+    ?assertEqual(~"HELLO, WASI 0.3\n", wasm_demo:upper(~"hello, wasi 0.3\n")),
+    ?assertEqual(<<>>, wasm_demo:upper(<<>>)),
+    Big = binary:copy(~"abcdefgh", 10000),
+    ?assertEqual(string:uppercase(Big), wasm_demo:upper(Big)).
+
 %% No `application:ensure_all_started(wasm)': a component compiles inline
 %% when the module cache is not running.
 component_test() ->

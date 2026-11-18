@@ -2,7 +2,8 @@
 
 A small project that uses [erlang_wasm][] 0.10.1: a module compiled from text, a
 host function the guest calls, two language runtimes, QuickJS and CPython, kept
-running over stdin and stdout, and a component called with typed values. The
+running over stdin and stdout, a component called with typed values, and a
+WASI 0.3 command that streams its input to its output. The
 runtime is written in Erlang, so there is no native toolchain to install and
 nothing to build beyond `rebar3 compile`.
 
@@ -75,9 +76,17 @@ A component, called with strings, records and lists rather than pointers:
 ok
 ```
 
+A WASI 0.3 command, given bytes on standard input:
+
+```erlang
+15> wasm_demo:upper(~"hello, wasi 0.3\n").
+<<"HELLO, WASI 0.3\n">>
+```
+
 The first two calls build and run a module inline. The worker calls keep an
 interpreter alive between requests, and most of this page is about them. The
-last block is a component, and [Components](#components) explains it.
+component is explained in [Components](#components), and the last call in
+[WASI 0.3](#wasi-03).
 
 ## Why the worker, in one table
 
@@ -117,6 +126,7 @@ use.
 | `worker.js` | yes | the JavaScript guest: one JSON object per line in, one per line out |
 | `worker.py` | yes | the same thing in Python |
 | `text.component.wasm` | yes | the component, built from `component/` by `make component` |
+| `upper.component.wasm` | yes | the WASI 0.3 command, built from `wasi3/` by `make wasi3` |
 | `qjs-wasi.wasm` | **no** | the QuickJS interpreter, [released by quickjs-ng][qjs] |
 | `python.wasm` | **no** | CPython 3.12 for `wasm32-wasi`, [built by VMware Labs][wlr] |
 
@@ -293,6 +303,52 @@ Notes:
 [Components][components] in the erlang_wasm guides has the full descriptor
 table, composed components and WASI 0.2.
 
+## WASI 0.3
+
+WASI 0.3 is the version of WASI built on the Component Model's own async: a
+slow call is an `async func`, and data moves through `stream<T>` and
+`future<T>` instead of 0.2's `wasi:io` handles. `priv/upper.component.wasm` is
+a 0.3 command, built from `wasi3/`. Its world is three lines:
+
+```wit
+world upper {
+  import wasi:cli/stdin@0.3.0;
+  import wasi:cli/stdout@0.3.0;
+  export wasi:cli/run@0.3.0;
+}
+```
+
+`run` is an `async func`. The guest asks for standard input as a stream, makes
+a second stream that standard output reads from, and moves each chunk across,
+upper-cased, as it arrives. It never holds the whole input (`wasi3/src/lib.rs`
+is thirty lines).
+
+You run it with one call, which builds the WASI 0.3 host, runs the command to
+its end and gives back what it wrote:
+
+```erlang
+{ok, #{stdout := Out, exit_code := 0}} =
+    wasi_preview3:run_command(Bin, ~"hello, wasi 0.3\n",
+                              #{args => [~"upper"], compile => true}).
+```
+
+Notes:
+
+- The second argument is all of standard input. The guest reads it as a stream,
+  in chunks, so a large input crosses in several reads; `wasm_demo_tests`
+  sends 80 KB to check that.
+- `compile => true` compiles the component in your process. Without it the
+  runner loads it through the module cache, which needs the `wasm` application
+  started.
+- `wasi_preview3:run_command/3` also runs a WASI 0.2 command, so you can use it
+  whichever version a component was built for.
+- To change it, edit `wasi3/` and run `make wasi3`, which needs Rust with the
+  `wasm32-unknown-unknown` target and `wasm-tools`. The WASI 0.3 interfaces it
+  builds against are in `wasi3/wit/deps`.
+
+[WASI 0.3][wasi3] in the erlang_wasm guides covers serving a 0.3 HTTP handler
+and the host modules.
+
 ## Capabilities
 
 Files and the network are never ambient: leave `dirs` out and the guest has
@@ -310,3 +366,4 @@ Apache-2.0. See [LICENSE](LICENSE).
 [streams]: https://github.com/benoitc/erlang_wasm/blob/main/docs/streams.md
 [workers]: https://github.com/benoitc/erlang_wasm/blob/main/docs/worker.md
 [components]: https://github.com/benoitc/erlang_wasm/blob/main/docs/components.md
+[wasi3]: https://github.com/benoitc/erlang_wasm/blob/main/docs/wasi-0-3.md

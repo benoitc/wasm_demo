@@ -1,10 +1,11 @@
-%% Four things a project does with erlang_wasm: call a module, let it call
-%% back into Erlang, keep an interpreter running as a worker, and call a
-%% component through typed values instead of bare numbers.
+%% Five things a project does with erlang_wasm: call a module, let it call
+%% back into Erlang, keep an interpreter running as a worker, call a component
+%% through typed values instead of bare numbers, and run a WASI 0.3 command.
 -module(wasm_demo).
 
 -export([add/2, greet/1, js_worker/0, py_worker/0, ask/2, ask/3, stop/1]).
 -export([text/1, shout/2, tally/1, count/3, top/3, drop/2, close/1]).
+-export([upper/1]).
 
 %% A module compiled from text, called like a function.
 add(A, B) ->
@@ -130,6 +131,21 @@ top(T, H, N) ->
 drop(T, H) -> wasm_component:drop_resource(T, words(~"[dtor]tally"), H).
 
 close(T) -> wasm_component:destroy(T).
+
+%% A WASI 0.3 command, built from wasi3/ and committed as
+%% priv/upper.component.wasm. Its `run` is an `async func`, and it reads
+%% standard input and writes standard output as 0.3 streams (`stream<u8>`),
+%% upper-casing each chunk as it goes. `wasi_preview3:run_command/3` runs it
+%% to its end and hands back what it wrote and its exit code.
+%%
+%% `compile => true' compiles the component in this process. Without it the
+%% runner loads it through the module cache, which needs `wasm' started.
+upper(Input) when is_binary(Input) ->
+    Bin = guest(code:priv_dir(wasm_demo), "upper.component.wasm"),
+    {ok, #{stdout := Out, exit_code := 0}} =
+        wasi_preview3:run_command(Bin, Input, #{args => [~"upper"],
+                                                compile => true}),
+    Out.
 
 %%% ------------------------------------------------------------- internals ---
 
