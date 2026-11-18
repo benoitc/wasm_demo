@@ -1,7 +1,7 @@
 QJS_URL = https://github.com/quickjs-ng/quickjs/releases/download/v0.16.2/qjs-wasi.wasm
 PY_URL = https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python/3.12.0%2B20231211-040d5a6/python-3.12.0.wasm
 
-.PHONY: all priv component test shell clean distclean
+.PHONY: all priv component wasi3 test shell clean distclean
 
 all: priv
 	rebar3 compile
@@ -26,6 +26,15 @@ component:
 	    component/target/wasm32-unknown-unknown/release/text.wasm \
 	    -o priv/text.component.wasm
 	wasm-tools validate --features component-model priv/text.component.wasm
+
+# Rebuilds priv/upper.component.wasm, the WASI 0.3 command, from wasi3/. Like
+# the component above it is in git, so you need this only to change it.
+wasi3:
+	cd wasi3 && cargo build --release --target wasm32-unknown-unknown
+	wasm-tools component new \
+	    wasi3/target/wasm32-unknown-unknown/release/upper.wasm \
+	    -o priv/upper.component.wasm
+	wasm-tools validate --features all priv/upper.component.wasm
 
 test: priv
 	rebar3 eunit

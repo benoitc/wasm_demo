@@ -1,0 +1,9 @@
+package demo:upper;
+
+/// A WASI 0.3 command: standard input in, the same bytes upper-cased out.
+/// Both ends are 0.3 streams, `stream<u8>`, not 0.2 `wasi:io` handles.
+world upper {
+  import wasi:cli/stdin@0.3.0;
+  import wasi:cli/stdout@0.3.0;
+  export wasi:cli/run@0.3.0;
+}
