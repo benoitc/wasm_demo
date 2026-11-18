@@ -2,8 +2,10 @@
 
 A small project that uses [erlang_wasm][] 0.10.1: a module compiled from text, a
 host function the guest calls, two language runtimes, QuickJS and CPython, kept
-running over stdin and stdout, a component called with typed values, and a
-WASI 0.3 command that streams its input to its output. The
+running over stdin and stdout, a component called with typed values, a
+WASI 0.3 command that streams its input to its output, and a real use of
+all this: a checkout where each merchant's discount rule is JavaScript they
+wrote, run in a sandbox on every checkout. The
 runtime is written in Erlang, so there is no native toolchain to install and
 nothing to build beyond `rebar3 compile`.
 
@@ -83,10 +85,20 @@ A WASI 0.3 command, given bytes on standard input:
 <<"HELLO, WASI 0.3\n">>
 ```
 
+And the checkout, where merchant `a`'s rule is JavaScript it uploaded:
+
+```erlang
+16> checkout:start(), checkout:upload(a, checkout:rule(big_order)).
+{ok,1}
+17> checkout:checkout(a, checkout:cart(12000, ~"gold")).
+{ok,[#{<<"code">> => <<"BIG10">>,<<"percent">> => 10,
+       <<"reason">> => <<"order over 100 EUR">>}]}
+```
+
 The first two calls build and run a module inline. The worker calls keep an
 interpreter alive between requests, and most of this page is about them. The
-component is explained in [Components](#components), and the last call in
-[WASI 0.3](#wasi-03).
+component is explained in [Components](#components), the WASI 0.3 command
+in [WASI 0.3](#wasi-03), and the checkout in [Checkout rules](#checkout-rules).
 
 ## Why the worker, in one table
 
@@ -127,6 +139,8 @@ use.
 | `worker.py` | yes | the same thing in Python |
 | `text.component.wasm` | yes | the component, built from `component/` by `make component` |
 | `upper.component.wasm` | yes | the WASI 0.3 command, built from `wasi3/` by `make wasi3` |
+| `host/rules_host.js` | yes | the program a checkout runtime runs: it compiles merchants' rules and calls them |
+| `rules/` | yes | example merchant rules, good and bad, for the checkout |
 | `qjs-wasi.wasm` | **no** | the QuickJS interpreter, [released by quickjs-ng][qjs] |
 | `python.wasm` | **no** | CPython 3.12 for `wasm32-wasi`, [built by VMware Labs][wlr] |
 
@@ -348,6 +362,39 @@ Notes:
 
 [WASI 0.3][wasi3] in the erlang_wasm guides covers serving a 0.3 HTTP handler
 and the host modules.
+
+## Checkout rules
+
+A real use of everything above: a shop's checkout service where each merchant
+writes their own discount rule in JavaScript, and the service runs it on
+every checkout, under a 100 ms deadline. The checkout never fails: a rule
+that loops, throws or answers nonsense gives no discount, and the reason is
+counted.
+
+```erlang
+checkout:start(),
+{ok, 1} = checkout:upload(a, checkout:rule(big_order)),
+{ok, _} = checkout:checkout(a, checkout:cart(12000, ~"gold")),
+checkout:load([a], 5).
+```
+
+What it shows:
+
+- **Warm runtimes, rules added on the fly.** Each merchant has QuickJS
+  runtimes that start once and keep running. An upload compiles the rule
+  into them while they run, so a checkout calls a function that already
+  exists, in 12 to 17 ms here.
+- **Live changes.** Uploading a new version under load loses no checkout and
+  restarts no runtime; `rollback/1` goes back the same way.
+- **Failures stay with their merchant.** A rule that loops is killed at the
+  deadline and its runtime started again by that merchant's own supervisor.
+  The other merchants' checkouts do not slow down.
+- **Bad rules are refused before they go live**, and a rule that keeps
+  failing is switched back to its previous version by a breaker.
+
+[docs/checkout.md](docs/checkout.md) is the guide. It walks through every
+step with real output, shows how to write and try your own rule, lists what
+each failure looks like, and has the API.
 
 ## Capabilities
 

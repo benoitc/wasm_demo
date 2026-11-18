@@ -6,6 +6,8 @@
 -export([add/2, greet/1, js_worker/0, py_worker/0, ask/2, ask/3, stop/1]).
 -export([text/1, shout/2, tally/1, count/3, top/3, drop/2, close/1]).
 -export([upper/1]).
+%% For `checkout_rules', which loads the same QuickJS build.
+-export([guest/2]).
 
 %% A module compiled from text, called like a function.
 add(A, B) ->
