@@ -149,15 +149,18 @@ answer({error, {down, _}}, _Cart) ->
 -spec rollback(atom()) -> {ok, pos_integer()} | {error, no_previous}.
 rollback(Merchant) -> checkout_rules:rollback(Merchant).
 
--doc "Print every merchant's versions, breaker and counts, and return them.".
--spec status() -> [map()].
+-doc """
+Print every merchant's versions, runtimes, counts and breaker.
+`checkout_rules:status/0` returns the same as maps.
+""".
+-spec status() -> ok.
 status() ->
     S = checkout_rules:status(),
     [io:format("~p: active ~p, previous ~p, ~p runtimes, counts ~p~s~n",
                [M, A, P, R, C, breaker(B)])
      || #{merchant := M, active := A, previous := P, runtimes := R,
           counts := C, breaker := B} <- S, M =/= '$validation'],
-    S.
+    ok.
 
 breaker(none) -> "";
 breaker(#{from := F, to := T, reason := Why}) ->
@@ -167,9 +170,12 @@ breaker(#{from := F, to := T, reason := Why}) ->
 -doc """
 Run checkouts for `Merchants` for `Seconds`, two clients per merchant, and
 print one line per merchant: checkouts, outcomes, versions seen, p50 and p99.
+`checkout_load:run/2` returns the same as maps.
 """.
--spec load([atom()], pos_integer()) -> [map()].
-load(Merchants, Seconds) -> checkout_load:run(Merchants, Seconds).
+-spec load([atom()], pos_integer()) -> ok.
+load(Merchants, Seconds) ->
+    _ = checkout_load:run(Merchants, Seconds),
+    ok.
 
 -doc """
 A cart of one item at `Cents`, for a customer of tier `Tier` (`~"gold"`,

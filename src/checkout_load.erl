@@ -69,9 +69,9 @@ pct(Sorted, P) ->
     round(lists:nth(I, Sorted) / 100) / 10.
 
 print(Rows) ->
-    io:format("~-10s ~9s ~8s  ~-44s ~-9s ~7s ~7s~n",
+    io:format("~-10s ~9s ~8s  ~-52s ~-9s ~7s ~7s~n",
               ["merchant", "checkouts", "ok", "fallbacks", "versions", "p50 ms", "p99 ms"]),
-    [io:format("~-10s ~9b ~8b  ~-44s ~-9s ~7.1f ~7.1f~n",
+    [io:format("~-10s ~9b ~8b  ~-52s ~-9s ~7.1f ~7.1f~n",
                [atom_to_list(M), N, maps:get(ok, K, 0), fallbacks(K),
                 versions(Vs), P50, P99])
      || #{merchant := M, checkouts := N, outcomes := K, versions := Vs,
