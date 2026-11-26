@@ -1,7 +1,6 @@
 # wasm_demo
 
-A small project that uses [erlang_wasm][] (a pinned commit until the actor API
-reaches Hex): a module compiled from text, a
+A small project that uses [erlang_wasm][] 0.12.0: a module compiled from text, a
 host function the guest calls, two language runtimes, QuickJS and CPython, kept
 running over stdin and stdout, a component called with typed values, a
 WASI 0.3 command that streams its input to its output, two C components
