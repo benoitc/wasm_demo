@@ -402,8 +402,9 @@ The pieces:
 - `actor/wit/counter.wit` is the contract: a `message` variant, an
   `import post` the guest sends with and an `export handle` the runtime calls
   per message.
-- `actor/src/counter.c` is the handler, eighteen lines. Its bindings are
-  generated from the WIT by `wit-bindgen c`; nothing in it knows Erlang.
+- `actor/src/counter.c` is the handler, eighteen lines; nothing in it knows
+  Erlang. It includes `counter_actor.h`, which `wit-bindgen c` generated from
+  the WIT into `actor/bindings/`, committed beside it.
 - `src/counter_actors.erl` is the supervisor. It gives the host the same
   message type, as a `wasm_canon` descriptor, and wires each actor's posts to
   the observer.
@@ -413,12 +414,18 @@ The pieces:
   after the restart.
 
 The built component is in git as `priv/counter.component.wasm`, so you need
-no C or WebAssembly toolchain to run it. To change the C code you need
-wit-bindgen 0.62 (`cargo install wit-bindgen-cli`), WASI SDK 34 and
-`wasm-tools`, then:
+no C or WebAssembly toolchain to run it. To change the C code you need WASI
+SDK 34 and `wasm-tools`, then:
 
 ```sh
 make actor
+```
+
+To change the WIT, regenerate the bindings first. That needs wit-bindgen 0.62
+(`cargo install wit-bindgen-cli`):
+
+```sh
+make actor-bindings actor
 ```
 
 `WASI_SDK` points at the SDK if it is not in

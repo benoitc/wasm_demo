@@ -1,7 +1,7 @@
 QJS_URL = https://github.com/quickjs-ng/quickjs/releases/download/v0.16.2/qjs-wasi.wasm
 PY_URL = https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python/3.12.0%2B20231211-040d5a6/python-3.12.0.wasm
 
-.PHONY: all priv component wasi3 actor test shell clean distclean
+.PHONY: all priv component wasi3 actor actor-bindings test shell clean distclean
 
 all: priv
 	rebar3 compile
@@ -37,22 +37,26 @@ wasi3:
 	wasm-tools validate --features all priv/upper.component.wasm
 
 # Rebuilds priv/counter.component.wasm, the C counter actor, from actor/. The
-# built component is in git, so you need this only to change it, and then
-# you need wit-bindgen 0.62 (`cargo install wit-bindgen-cli'), WASI SDK 34
-# and wasm-tools. The C bindings are generated from actor/wit into
-# actor/build and are not committed.
+# built component is in git, so you need this only to change it, and then you
+# need WASI SDK 34 and wasm-tools. The C bindings wit-bindgen generates from
+# actor/wit are in git too, in actor/bindings, so counter.c finds
+# counter_actor.h without running anything.
 WASI_SDK ?= $(HOME)/.local/opt/wasi-sdk-34.0-arm64-macos
 actor:
 	mkdir -p actor/build
-	wit-bindgen c actor/wit --world counter-actor --out-dir actor/build
 	$(WASI_SDK)/bin/clang --target=wasm32-wasip1 -O2 -nostartfiles \
-	    -Wl,--no-entry -Wl,--strip-all -Iactor/build \
-	    actor/src/counter.c actor/build/counter_actor.c \
-	    actor/build/counter_actor_component_type.o \
+	    -Wl,--no-entry -Wl,--strip-all -Iactor/bindings \
+	    actor/src/counter.c actor/bindings/counter_actor.c \
+	    actor/bindings/counter_actor_component_type.o \
 	    -o actor/build/counter.core.wasm
 	wasm-tools component new actor/build/counter.core.wasm \
 	    -o priv/counter.component.wasm
 	wasm-tools validate --features component-model priv/counter.component.wasm
+
+# Regenerates actor/bindings after a change to actor/wit/counter.wit. Needs
+# wit-bindgen 0.62 (`cargo install wit-bindgen-cli'). Run `make actor' after.
+actor-bindings:
+	wit-bindgen c actor/wit --world counter-actor --out-dir actor/bindings
 
 test: priv
 	rebar3 eunit
