@@ -1,11 +1,13 @@
-%% Five things a project does with erlang_wasm: call a module, let it call
+%% Six things a project does with erlang_wasm: call a module, let it call
 %% back into Erlang, keep an interpreter running as a worker, call a component
-%% through typed values instead of bare numbers, and run a WASI 0.3 command.
+%% through typed values instead of bare numbers, run a WASI 0.3 command, and
+%% run components as supervised actors that send each other messages.
 -module(wasm_demo).
 
 -export([add/2, greet/1, js_worker/0, py_worker/0, ask/2, ask/3, stop/1]).
 -export([text/1, shout/2, tally/1, count/3, top/3, drop/2, close/1]).
 -export([upper/1]).
+-export([actor_demo/0]).
 %% For `checkout_rules', which loads the same QuickJS build.
 -export([guest/2]).
 
@@ -149,6 +151,53 @@ upper(Input) when is_binary(Input) ->
                                                 compile => true}),
     Out.
 
+%% Two counter actors under a supervisor, driven by this process and watched by
+%% an observer. Each actor is the C component in actor/: it keeps a total in
+%% its own memory, and on `add(n)' posts `added(total)'. Its posts go to the
+%% observer, an ordinary Erlang process, which prints them.
+%%
+%% A gets 2 then 3 and B gets 3, so A posts 2 then 5 and B posts 3: two
+%% instances, two totals. Then A is killed. The supervisor starts a new A on a
+%% new instance, so 1 sent to it comes back as 1, while B, untouched, still
+%% holds 3 and answers 3 to an `add(0)'.
+%%
+%% Returns what the observer saw, in order.
+actor_demo() ->
+    {ok, _} = application:ensure_all_started(wasm),
+    Self = self(),
+    Observer = spawn_link(fun() -> observe(Self) end),
+    {ok, Sup} = counter_actors:start_link(Observer),
+    try
+        ok = wasm_actor:send(counter_a, {~"add", 2}),
+        ok = wasm_actor:send(counter_a, {~"add", 3}),
+        E1 = observed(2),
+        ok = wasm_actor:send(counter_b, {~"add", 3}),
+        E2 = observed(1),
+        Old = whereis(counter_a),
+        Mon = monitor(process, Old),
+        exit(Old, kill),
+        Down = receive
+                   {'DOWN', Mon, process, Old, Why} ->
+                       io:format("counter_a is down: ~p~n", [Why]),
+                       {counter_a, {down, Why}}
+               after 5000 -> error(no_down)
+               end,
+        New = replacement(counter_a, Old, 100),
+        io:format("counter_a is back as ~p, was ~p~n", [New, Old]),
+        ok = wasm_actor:send(counter_a, {~"add", 1}),
+        E3 = observed(1),
+        ok = wasm_actor:send(counter_b, {~"add", 0}),
+        E4 = observed(1),
+        E1 ++ E2 ++ [Down] ++ E3 ++ E4
+    after
+        unlink(Sup),
+        SupMon = monitor(process, Sup),
+        exit(Sup, shutdown),
+        receive {'DOWN', SupMon, process, Sup, _} -> ok end,
+        unlink(Observer),
+        exit(Observer, shutdown)
+    end.
+
 %%% ------------------------------------------------------------- internals ---
 
 %% Exports of an interface are named `<interface>#<function>`.
@@ -202,3 +251,26 @@ collect_line(_Owner, Data) ->
             put(outbuf, Buf)
     end,
     ok.
+
+%% The observer: prints each post and tells the sender it has seen it, which
+%% is how the sender knows a message was handled.
+observe(Sender) ->
+    receive
+        {Name, {~"added", N}} ->
+            io:format("~s posted added(~b)~n", [Name, N]),
+            Sender ! {observed, {Name, N}},
+            observe(Sender)
+    end.
+
+observed(N) ->
+    [receive {observed, E} -> E after 5000 -> error(nothing_observed) end
+     || _ <- lists:seq(1, N)].
+
+%% The supervisor registers the new actor under the same name.
+replacement(_Name, _Old, 0) ->
+    error(no_replacement);
+replacement(Name, Old, Tries) ->
+    case whereis(Name) of
+        Pid when is_pid(Pid), Pid =/= Old -> Pid;
+        _ -> timer:sleep(10), replacement(Name, Old, Tries - 1)
+    end.

@@ -1,0 +1,12 @@
+package demo:actors@0.1.0;
+
+interface protocol {
+    variant message { add(u32), added(u32) }
+    enum send-error { full, closed }
+}
+
+world counter-actor {
+    use protocol.{message, send-error};
+    import post: func(msg: message) -> result<_, send-error>;
+    export handle: func(msg: message);
+}
