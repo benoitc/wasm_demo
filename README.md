@@ -1,9 +1,11 @@
 # wasm_demo
 
-A small project that uses [erlang_wasm][] 0.10.1: a module compiled from text, a
+A small project that uses [erlang_wasm][] (a pinned commit until the actor API
+reaches Hex): a module compiled from text, a
 host function the guest calls, two language runtimes, QuickJS and CPython, kept
 running over stdin and stdout, a component called with typed values, a
-WASI 0.3 command that streams its input to its output, and a real use of
+WASI 0.3 command that streams its input to its output, two C components
+run as supervised actors that keep their own state, and a real use of
 all this: a checkout where each merchant's discount rule is JavaScript they
 wrote, run in a sandbox on every checkout. The
 runtime is written in Erlang, so there is no native toolchain to install and
@@ -21,7 +23,7 @@ and says so during the build.
 git clone https://github.com/benoitc/wasm_demo.git
 cd wasm_demo
 make priv          # downloads the two interpreters, about 26 MB, once
-make test          # 5 tests, 0 failures
+make test          # 14 tests, 0 failures
 ```
 
 `make priv` is the step that fills `priv/`. You do not have to run it
@@ -98,7 +100,8 @@ And the checkout, where merchant `a`'s rule is JavaScript it uploaded:
 The first two calls build and run a module inline. The worker calls keep an
 interpreter alive between requests, and most of this page is about them. The
 component is explained in [Components](#components), the WASI 0.3 command
-in [WASI 0.3](#wasi-03), and the checkout in [Checkout rules](#checkout-rules).
+in [WASI 0.3](#wasi-03), the actors in [Actors](#actors), and the checkout in
+[Checkout rules](#checkout-rules).
 
 ## Why the worker, in one table
 
@@ -139,6 +142,7 @@ use.
 | `worker.py` | yes | the same thing in Python |
 | `text.component.wasm` | yes | the component, built from `component/` by `make component` |
 | `upper.component.wasm` | yes | the WASI 0.3 command, built from `wasi3/` by `make wasi3` |
+| `counter.component.wasm` | yes | the C counter actor, built from `actor/` by `make actor` |
 | `host/rules_host.js` | yes | the program a checkout runtime runs: it compiles merchants' rules and calls them |
 | `rules/` | yes | example merchant rules, good and bad, for the checkout |
 | `qjs-wasi.wasm` | **no** | the QuickJS interpreter, [released by quickjs-ng][qjs] |
@@ -362,6 +366,64 @@ Notes:
 
 [WASI 0.3][wasi3] in the erlang_wasm guides covers serving a 0.3 HTTP handler
 and the host modules.
+
+## Actors
+
+Two copies of one C component, each in an OTP process of its own under a
+supervisor, each keeping a running total in its own memory. An actor handles
+one message at a time; on `add(n)` the C code adds `n` and posts
+`added(total)`. Where a post goes is decided by the host when it starts the
+actor: here, to an observer, an ordinary Erlang process that prints it.
+
+```erlang
+18> wasm_demo:actor_demo().
+counter_a posted added(2)
+counter_a posted added(5)
+counter_b posted added(3)
+counter_a is down: killed
+counter_a is back as <0.136.0>, was <0.133.0>
+counter_a posted added(1)
+counter_b posted added(3)
+[{counter_a,2},
+ {counter_a,5},
+ {counter_b,3},
+ {counter_a,{down,killed}},
+ {counter_a,1},
+ {counter_b,3}]
+```
+
+The demo sends 2 then 3 to A and 3 to B, so A posts 2 then 5 and B posts 3:
+two instances, two totals. Then it kills A. The supervisor starts a new A on a
+new instance, so 1 sent to it comes back as 1. B is untouched and still holds
+3, which an `add(0)` shows. Between the kill and the restart the supervisor
+prints a report; it is left out above.
+
+The pieces:
+
+- `actor/wit/counter.wit` is the contract: a `message` variant, an
+  `import post` the guest sends with and an `export handle` the runtime calls
+  per message.
+- `actor/src/counter.c` is the handler, eighteen lines. Its bindings are
+  generated from the WIT by `wit-bindgen c`; nothing in it knows Erlang.
+- `src/counter_actors.erl` is the supervisor. It gives the host the same
+  message type, as a `wasm_canon` descriptor, and wires each actor's posts to
+  the observer.
+- `wasm_actor:send/2` answers `ok` once a message is in the actor's queue,
+  `{error, full}` when the queue is at its capacity and `{error, closed}`
+  when no actor is there. Sending to the registered name finds the new A
+  after the restart.
+
+The built component is in git as `priv/counter.component.wasm`, so you need
+no C or WebAssembly toolchain to run it. To change the C code you need
+wit-bindgen 0.62 (`cargo install wit-bindgen-cli`), WASI SDK 34 and
+`wasm-tools`, then:
+
+```sh
+make actor
+```
+
+`WASI_SDK` points at the SDK if it is not in
+`~/.local/opt/wasi-sdk-34.0-arm64-macos`.
 
 ## Checkout rules
 
