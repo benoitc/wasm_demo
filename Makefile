@@ -40,12 +40,14 @@ wasi3:
 # built component is in git, so you need this only to change it, and then you
 # need WASI SDK 34 and wasm-tools. The C bindings wit-bindgen generates from
 # actor/wit are in git too, in actor/bindings, so counter.c finds
-# counter_actor.h without running anything.
+# counter_actor.h without running anything. `--no-wasm-opt' because clang
+# otherwise runs wasm-opt when it finds one on PATH, and the bytes would
+# depend on whether you have binaryen installed.
 WASI_SDK ?= $(HOME)/.local/opt/wasi-sdk-34.0-arm64-macos
 actor:
 	mkdir -p actor/build
-	$(WASI_SDK)/bin/clang --target=wasm32-wasip1 -O2 -nostartfiles \
-	    -Wl,--no-entry -Wl,--strip-all -Iactor/bindings \
+	$(WASI_SDK)/bin/clang --target=wasm32-wasip1 -O2 --no-wasm-opt \
+	    -nostartfiles -Wl,--no-entry -Wl,--strip-all -Iactor/bindings \
 	    actor/src/counter.c actor/bindings/counter_actor.c \
 	    actor/bindings/counter_actor_component_type.o \
 	    -o actor/build/counter.core.wasm
